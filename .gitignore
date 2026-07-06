@@ -1,0 +1,12 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.env
+data/
+build/
+dist/
+*.spec
+.pytest_cache/
+.claude
+sms_bot.md

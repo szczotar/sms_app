@@ -1,0 +1,7 @@
+pandas
+openpyxl
+xlrd
+python-dotenv
+requests
+pyinstaller
+pytest
