@@ -16,5 +16,6 @@ DATA_DIR = APP_DIR / "data"
 
 load_dotenv(APP_DIR / ".env")
 
-API_SMS_PL_KEY = os.getenv("API_SMS_PL_KEY", "").strip()
-API_SMS_PL_SENDER = os.getenv("API_SMS_PL_SENDER", "").strip()
+HOSTEDSMS_EMAIL = os.getenv("HOSTEDSMS_EMAIL", "").strip()
+HOSTEDSMS_PASSWORD = os.getenv("HOSTEDSMS_PASSWORD", "").strip()
+HOSTEDSMS_SENDER = os.getenv("HOSTEDSMS_SENDER", "").strip()

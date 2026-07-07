@@ -77,8 +77,16 @@ def _read_grid(path: Path) -> list[list[str | None]]:
     if suffix == ".csv":
         # Rows have inconsistent field counts (merged-cell export artifact),
         # which pandas' C parser rejects; the stdlib csv module tolerates it.
-        with open(path, encoding="cp1250", newline="") as f:
-            rows = list(csv.reader(f, delimiter=";"))
+        # The clinic's export is cp1250, but try utf-8 first (strict) in case
+        # the file was re-saved as utf-8 - cp1250 almost never raises on
+        # random bytes, so decoding a utf-8 file as cp1250 would silently
+        # mangle every accented character instead of failing loudly.
+        raw = path.read_bytes()
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = raw.decode("cp1250")
+        rows = list(csv.reader(text.splitlines(), delimiter=";"))
         return [_clean_row(row) for row in rows]
     raise ValueError(f"Nieobsługiwany format pliku: {suffix}")
 

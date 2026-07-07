@@ -24,37 +24,53 @@ class MockSmsSender:
         return SendResult(success=True)
 
 
-class ApiSmsPlSender:
-    """Real api-sms.pl integration.
+def _to_international(phone: str) -> str:
+    """HostedSMS requires numbers as 48xxxxxxxxx; our parsed phones are bare 9-digit."""
+    digits = phone.replace(" ", "").replace("-", "").lstrip("+")
+    if digits.startswith("48") and len(digits) == 11:
+        return digits
+    return "48" + digits
 
-    NOTE: endpoint/params below are best-effort placeholders based on typical
-    Polish SMS gateway conventions -- confirm against api-sms.pl's actual API
-    docs once an account/API key is available, before relying on this in
-    production.
+
+class HostedSmsSender:
+    """Real HostedSMS.pl (DCS) integration, using the SimpleApi interface.
+
+    Auth is UserEmail/Password (no separate API key). See
+    HostedSms-Opis_Techniczny_API_pl.pdf, section "Interfejs SimpleApi".
     """
 
-    ENDPOINT = "https://api-sms.pl/api/send"
+    ENDPOINT = "https://api.hostedsms.pl/SimpleApi"
 
-    def __init__(self, api_key: str, sender_name: str = ""):
-        self._api_key = api_key
-        self._sender_name = sender_name
+    def __init__(self, email: str, password: str, sender: str = ""):
+        self._email = email
+        self._password = password
+        self._sender = sender
 
     def send(self, phone: str, text: str) -> SendResult:
         try:
             response = requests.post(
                 self.ENDPOINT,
                 data={
-                    "key": self._api_key,
-                    "to": phone,
-                    "message": text,
-                    "sender": self._sender_name,
+                    "UserEmail": self._email,
+                    "Password": self._password,
+                    "Sender": self._sender,
+                    "Phone": _to_international(phone),
+                    "Message": text,
                 },
+                headers={"Accept": "application/json"},
                 timeout=10,
             )
             response.raise_for_status()
-            return SendResult(success=True)
+            payload = response.json()
         except requests.RequestException as exc:
             return SendResult(success=False, error=str(exc))
+        except ValueError as exc:
+            return SendResult(success=False, error=f"Nieprawidlowa odpowiedz serwera: {exc}")
+
+        error_message = payload.get("ErrorMessage")
+        if error_message:
+            return SendResult(success=False, error=error_message)
+        return SendResult(success=True)
 
 
 def send_with_retry(

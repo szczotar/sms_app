@@ -106,10 +106,28 @@ class MainWindow(tk.Tk):
 
         ttk.Button(top, text="Ustawienia...", command=self.open_settings).pack(side="right")
 
+        mode_frame = ttk.Frame(self)
+        mode_frame.pack(fill="x", padx=10)
+        ttk.Label(mode_frame, text="Wysylka przypomnien:").pack(side="left")
+        self.reminder_mode = tk.StringVar(value="5-day")
+        ttk.Radiobutton(
+            mode_frame, text="5 dni przed", variable=self.reminder_mode, value="5-day"
+        ).pack(side="left", padx=(10, 0))
+        ttk.Radiobutton(
+            mode_frame, text="2 dni przed", variable=self.reminder_mode, value="2-day"
+        ).pack(side="left", padx=(10, 0))
+
+        actions = ttk.Frame(self)
+        actions.pack(fill="x", padx=10, pady=(0, 10))
+
         self.send_button = ttk.Button(
-            self, text="Wyslij SMS", command=self.start_pipeline, state="disabled"
+            actions, text="Wyslij SMS", command=self.start_pipeline, state="disabled"
         )
-        self.send_button.pack(padx=10, pady=(0, 10), anchor="w")
+        self.send_button.pack(side="left")
+
+        ttk.Button(actions, text="Zapisz raport...", command=self.save_report).pack(
+            side="left", padx=(10, 0)
+        )
 
         self.console = scrolledtext.ScrolledText(self, height=20, state="disabled", wrap="word")
         self.console.pack(fill="both", expand=True, padx=10, pady=(0, 10))
@@ -131,6 +149,18 @@ class MainWindow(tk.Tk):
     def open_settings(self):
         SettingsWindow(self)
 
+    def save_report(self):
+        path = filedialog.asksaveasfilename(
+            defaultextension=".txt",
+            filetypes=[("Plik tekstowy", "*.txt"), ("Wszystkie pliki", "*.*")],
+        )
+        if not path:
+            return
+        content = self.console.get("1.0", "end-1c")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        messagebox.showinfo("Zapisz raport", "Raport zapisany.")
+
     def log(self, message: str):
         self._log_queue.put(message)
 
@@ -151,10 +181,13 @@ class MainWindow(tk.Tk):
             return
         self.send_button.config(state="disabled")
         self.summary_label.config(text="")
-        thread = threading.Thread(target=self._run_pipeline, args=(self.report_path,), daemon=True)
+        rtype = self.reminder_mode.get()
+        thread = threading.Thread(
+            target=self._run_pipeline, args=(self.report_path, rtype), daemon=True
+        )
         thread.start()
 
-    def _run_pipeline(self, path: str):
+    def _run_pipeline(self, path: str, rtype: str):
         templates = templates_store.load()
         try:
             visits = report_parser.load_report(path)
@@ -166,11 +199,6 @@ class MainWindow(tk.Tk):
         sent_count = failed_count = skipped_count = 0
 
         for visit in visits:
-            rtype = reminder_logic.reminder_type(visit.appointment_date)
-            if rtype is None:
-                skipped_count += 1
-                continue
-
             if visit.status != STATUS_DO_REALIZACJI:
                 self.log(
                     f"POMINIETO: {visit.patient_name} - nierozpoznany status '{visit.status}'"
