@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, time
 
 
@@ -9,5 +9,6 @@ class Visit:
     appointment_time: time
     patient_name: str
     pesel: str
-    phone: str | None
-    status: str
+    phones: list[str] = field(default_factory=list)
+    price: float | None = None
+    price_note: str | None = None

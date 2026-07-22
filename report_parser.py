@@ -6,19 +6,20 @@ blocks per doctor/date section:
 
     <doctor name> ... <date>          <- header row for a new section
     Lp | Nr | Godz | Nazwisko i imię pacjenta   <- column header row
-                                       PESEL      <- column header row
+                                       Telefon    <- column header row
+    <PESEL>                                       <- PESEL row (precedes patient)
     1 | 1 | 14:00 | Godlewska Zofia | Do realizacji   <- patient row
-                                       11322302640    <- PESEL (+ phone) row
+                                       <phone(s)>      <- phone row (comma-separated if several)
+                                       <Uwagi>          <- optional price or note row (e.g. "100", "nb-nieobecnosc")
 
 Column positions shift between xls/xlsx/csv exports of the same data (cell
 merging differs per format), so rows are classified by matching value
-*patterns* (an HH:MM time, an 11-digit PESEL, a "DD <month> YYYY" date)
-rather than by fixed column index.
+*patterns* (an HH:MM time, an 11-digit PESEL, a "DD <month> YYYY" date, a
+9-digit phone) rather than by fixed column index.
 
-NOTE: the real production export will include a phone number column that
-isn't present in the current sample files. The phone-detection pattern
-below is a best guess (9 Polish digits, optionally "+48"-prefixed) and
-should be revisited once a real sample with that column is available.
+There is no per-row status column in this export format: "Do realizacji"
+appears once, as a report-level label, not per visit. Callers should assume
+the report was already filtered upstream to the visits that matter.
 """
 
 import csv
@@ -49,10 +50,11 @@ _DATE_RE = re.compile(r"(\d{1,2})\s+(" + "|".join(_MONTHS) + r")\s+(\d{4})", re.
 _TIME_RE = re.compile(r"^(\d{1,2}):(\d{2})(?::\d{2})?$")
 _PESEL_RE = re.compile(r"^\d{11}$")
 _PHONE_RE = re.compile(r"^(?:\+?48)?(\d{9})$")
-_HEADER_KEYWORDS = {"lp", "nr", "godz", "pesel"}
+_PRICE_NUM_RE = re.compile(r"(\d+(?:[.,]\d{1,2})?)")
+_HEADER_KEYWORDS = {"lp", "nr", "godz", "pesel", "telefon", "uwagi"}
 
-# how many rows after a patient row to keep looking for its PESEL/phone
-_PESEL_LOOKAHEAD_ROWS = 3
+# how many content rows after a patient row to keep looking for phone/price
+_LOOKAHEAD_ROWS = 3
 
 
 def _clean_row(row) -> list[str | None]:
@@ -116,8 +118,8 @@ def _is_header_row(row: list[str | None]) -> bool:
     return any("strona" in c.lower() for c in row if c)
 
 
-def _classify_patient_row(row: list[str | None]) -> tuple[time, str, str] | None:
-    """Return (time, name, status) if this row starts a new patient entry."""
+def _classify_patient_row(row: list[str | None]) -> tuple[time, str] | None:
+    """Return (time, name) if this row starts a new patient entry."""
     time_val = None
     alpha_cells = []
     for cell in row:
@@ -132,25 +134,32 @@ def _classify_patient_row(row: list[str | None]) -> tuple[time, str, str] | None
         alpha_cells.append(cell)
     if time_val is None or not alpha_cells:
         return None
-    name = alpha_cells[0]
-    status = alpha_cells[-1] if len(alpha_cells) > 1 else ""
-    return time_val, name, status
+    return time_val, alpha_cells[0]
 
 
-def _extract_pesel_phone(row: list[str | None]) -> tuple[str | None, str | None]:
-    pesel = None
-    phone = None
+def _row_content(row: list[str | None]) -> str | None:
     for cell in row:
-        if not cell:
-            continue
-        digits = cell.replace(" ", "").replace("-", "")
-        if pesel is None and _PESEL_RE.match(digits):
-            pesel = digits
-            continue
+        if cell:
+            return cell
+    return None
+
+
+def _split_phones(content: str) -> list[str] | None:
+    phones = []
+    for part in content.split(","):
+        digits = part.strip().replace(" ", "").replace("-", "")
         m = _PHONE_RE.match(digits)
-        if m:
-            phone = m.group(1)
-    return pesel, phone
+        if not m:
+            return None
+        phones.append(m.group(1))
+    return phones or None
+
+
+def _extract_price(content: str) -> tuple[float | None, str]:
+    m = _PRICE_NUM_RE.search(content)
+    if m:
+        return float(m.group(1).replace(",", ".")), content
+    return None, content
 
 
 def load_report(path: Path | str) -> list[Visit]:
@@ -160,6 +169,7 @@ def load_report(path: Path | str) -> list[Visit]:
     current_doctor: str | None = None
     current_date: date | None = None
     pending: dict | None = None
+    pending_pesel: str | None = None
     rows_since_pending = 0
 
     def flush_pending():
@@ -171,13 +181,15 @@ def load_report(path: Path | str) -> list[Visit]:
                 appointment_time=pending["time"],
                 patient_name=pending["name"],
                 pesel=pending["pesel"] or "",
-                phone=pending["phone"],
-                status=pending["status"],
+                phones=pending["phones"],
+                price=pending["price"],
+                price_note=pending["price_note"],
             ))
             pending = None
 
     for row in grid:
-        if all(c is None for c in row):
+        content = _row_content(row)
+        if content is None:
             flush_pending()
             continue
 
@@ -194,18 +206,36 @@ def load_report(path: Path | str) -> list[Visit]:
         patient = _classify_patient_row(row)
         if patient is not None:
             flush_pending()
-            time_val, name, status = patient
-            pending = {"time": time_val, "name": name, "status": status, "pesel": None, "phone": None}
+            time_val, name = patient
+            pending = {
+                "time": time_val, "name": name, "pesel": pending_pesel,
+                "phones": [], "price": None, "price_note": None,
+            }
+            pending_pesel = None
             rows_since_pending = 0
             continue
 
-        if pending is not None and rows_since_pending < _PESEL_LOOKAHEAD_ROWS:
-            pesel, phone = _extract_pesel_phone(row)
-            if pesel:
-                pending["pesel"] = pesel
-            if phone:
-                pending["phone"] = phone
-            rows_since_pending += 1
+        digits = content.replace(" ", "").replace("-", "")
+        if pending is None:
+            if _PESEL_RE.match(digits):
+                pending_pesel = digits
+            continue
+
+        if rows_since_pending >= _LOOKAHEAD_ROWS:
+            continue
+        rows_since_pending += 1
+
+        if not pending["phones"]:
+            phones = _split_phones(content)
+            if phones is not None:
+                pending["phones"] = phones
+                continue
+
+        price, note = _extract_price(content)
+        if price is not None:
+            pending["price"] = price
+        elif note.strip():
+            pending["price_note"] = note.strip()
 
     flush_pending()
     return visits
