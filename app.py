@@ -1,5 +1,5 @@
 import config
-from gui import MainWindow
+from gui import App
 from sent_log import SentLog
 from sms_sender import HostedSmsSender, MockSmsSender
 
@@ -14,7 +14,7 @@ def main():
     sender = build_sender()
     is_mock = isinstance(sender, MockSmsSender)
     sent_log = SentLog()
-    window = MainWindow(sender=sender, sent_log=sent_log, is_mock=is_mock)
+    window = App(sender=sender, sent_log=sent_log, is_mock=is_mock)
     window.mainloop()
 
 
