@@ -47,3 +47,15 @@ def resolve_rodzaj_wizyty(doctor: str, employees: list[dict]) -> str:
                 return "konsultacji lekarskiej"
             return "sesji"
     return "wizycie"
+
+
+def resolve_title(doctor: str, employees: list[dict]) -> str:
+    """Title prefix for the specialist's name: "dr" for psychiatrists,
+    "mgr" for psychologists/dietitians/others (magister, not a physician)."""
+    target = normalize_name(doctor)
+    for emp in employees:
+        if normalize_name(emp["name"]) == target:
+            if emp["specialization"].strip().lower() == PSYCHIATRA.lower():
+                return "dr"
+            return "mgr"
+    return ""

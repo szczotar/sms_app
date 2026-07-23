@@ -117,12 +117,36 @@ class SettingsWindow(ctk.CTkToplevel):
     def __init__(self, master):
         super().__init__(master)
         self.title("Ustawienia")
-        self.geometry("660x600")
         self.configure(fg_color=theme.BG)
         self.transient(master)
 
+        width, height = 660, 640
+        screen_h = self.winfo_screenheight()
+        height = min(height, screen_h - 100)
+        screen_w = self.winfo_screenwidth()
+        x = (screen_w - width) // 2
+        y = (screen_h - height) // 2
+        self.geometry(f"{width}x{height}+{x}+{y}")
+        self.minsize(560, 420)
+
         self.templates = templates_store.load()
         self.employees = [dict(e) for e in employees_store.load()]
+
+        # Pack the save button first, anchored to the bottom, so it always
+        # reserves its own space before the tabview claims the rest of the
+        # cavity (packing an expand widget first would let it squeeze out
+        # whatever is packed after it).
+        ctk.CTkButton(
+            self,
+            text="Zapisz",
+            command=self.save,
+            fg_color=theme.MAGENTA,
+            hover_color=theme.MAGENTA_DARK,
+            font=theme.font(13, "bold"),
+            height=38,
+            corner_radius=10,
+            width=140,
+        ).pack(side="bottom", pady=(0, 16))
 
         tabview = ctk.CTkTabview(
             self,
@@ -140,18 +164,6 @@ class SettingsWindow(ctk.CTkToplevel):
         self._build_templates_tab(tabview.tab("Szablony"))
         self._build_employees_tab(tabview.tab("Pracownicy"))
 
-        ctk.CTkButton(
-            self,
-            text="Zapisz",
-            command=self.save,
-            fg_color=theme.MAGENTA,
-            hover_color=theme.MAGENTA_DARK,
-            font=theme.font(13, "bold"),
-            height=38,
-            corner_radius=10,
-            width=140,
-        ).pack(pady=(0, 16))
-
     def _hint(self, parent, text):
         ctk.CTkLabel(
             parent,
@@ -162,7 +174,10 @@ class SettingsWindow(ctk.CTkToplevel):
             justify="left",
         ).pack(anchor="w", padx=12, pady=(2, 12))
 
-    def _build_templates_tab(self, parent):
+    def _build_templates_tab(self, outer):
+        parent = ctk.CTkScrollableFrame(outer, fg_color="transparent")
+        parent.pack(fill="both", expand=True)
+
         ctk.CTkLabel(
             parent, text="Szablon przypomnienia (5 dni przed wizyta):",
             font=theme.font(12, "bold"), text_color=theme.TEXT,
@@ -236,6 +251,19 @@ class SettingsWindow(ctk.CTkToplevel):
 
     def _build_employees_tab(self, parent):
         _style_treeview()
+
+        # Pack the bottom-anchored widgets (add-form, remove button) first so
+        # they always keep their space; the treeview (fill+expand) is packed
+        # last and only takes whatever cavity remains above them.
+        form = ctk.CTkFrame(parent, fg_color="transparent")
+        form.pack(side="bottom", fill="x", padx=12, pady=12)
+
+        ctk.CTkButton(
+            parent, text="Usun zaznaczonego", command=self._remove_employee,
+            fg_color="transparent", hover_color=theme.CARD_HOVER, text_color=theme.MAGENTA_DARK,
+            border_width=1, border_color=theme.MAGENTA, font=theme.font(11),
+        ).pack(side="bottom", anchor="w", padx=12, pady=(0, 12))
+
         columns = ("specialization", "name")
         self.employees_tree = ttk.Treeview(
             parent, columns=columns, show="headings", height=14, style="Psyche.Treeview"
@@ -246,9 +274,6 @@ class SettingsWindow(ctk.CTkToplevel):
 
         for emp in self.employees:
             self.employees_tree.insert("", "end", values=(emp["specialization"], emp["name"]))
-
-        form = ctk.CTkFrame(parent, fg_color="transparent")
-        form.pack(fill="x", padx=12, pady=12)
 
         ctk.CTkLabel(form, text="Specjalizacja:", font=theme.font(11), text_color=theme.TEXT).grid(
             row=0, column=0, sticky="w"
@@ -265,13 +290,7 @@ class SettingsWindow(ctk.CTkToplevel):
         ctk.CTkButton(
             form, text="Dodaj", command=self._add_employee, width=90,
             fg_color=theme.PURPLE, hover_color=theme.PURPLE_DARK, font=theme.font(11, "bold"),
-        ).grid(row=0, column=4)
-
-        ctk.CTkButton(
-            parent, text="Usun zaznaczonego", command=self._remove_employee,
-            fg_color="transparent", hover_color=theme.CARD_HOVER, text_color=theme.MAGENTA_DARK,
-            border_width=1, border_color=theme.MAGENTA, font=theme.font(11),
-        ).pack(anchor="w", padx=12, pady=(0, 12))
+        ).grid(row=1, column=0, columnspan=4, sticky="w", pady=(10, 0))
 
     def _add_employee(self):
         name = self.new_name.get().strip()
@@ -490,7 +509,11 @@ class RemindersFrame(ctk.CTkFrame):
                 continue
 
             rodzaj_wizyty = employees_store.resolve_rodzaj_wizyty(visit.doctor, employees)
-            message = reminder_logic.build_message(visit, templates[template_key], templates, rodzaj_wizyty)
+            title = employees_store.resolve_title(visit.doctor, employees)
+            lekarz_label = f"{title} {visit.doctor}".strip() if title else visit.doctor
+            message = reminder_logic.build_message(
+                visit, templates[template_key], templates, rodzaj_wizyty, lekarz_label
+            )
 
             any_success = False
             for phone in visit.phones:

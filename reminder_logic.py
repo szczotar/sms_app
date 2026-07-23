@@ -28,12 +28,18 @@ def build_koszt_info(price: float | None) -> str:
     return f" Koszt wizyty: {amount} zl."
 
 
-def build_message(visit: Visit, template: str, clinic_info: dict, rodzaj_wizyty: str = "wizycie") -> str:
+def build_message(
+    visit: Visit,
+    template: str,
+    clinic_info: dict,
+    rodzaj_wizyty: str = "wizycie",
+    lekarz: str | None = None,
+) -> str:
     values = {
         "imie_nazwisko": visit.patient_name,
         "data": format_date_pl(visit.appointment_date),
         "godzina": visit.appointment_time.strftime("%H:%M"),
-        "lekarz": visit.doctor,
+        "lekarz": lekarz if lekarz is not None else visit.doctor,
         "rodzaj_wizyty": rodzaj_wizyty,
         "koszt_info": build_koszt_info(visit.price),
         **clinic_info,

@@ -8,11 +8,11 @@ _DEFAULT_PATH = DATA_DIR / "templates.json"
 _DEFAULTS = {
     "template_5day": (
         "Przypominamy o {rodzaj_wizyty} {imie_nazwisko} w dniu {data} o godz. {godzina} "
-        "u lek. {lekarz} w {clinic_name}.{koszt_info} Aby odwołać wizytę, zadzwoń: {clinic_phone}."
+        "u {lekarz} w {clinic_name}.{koszt_info} Aby odwołać wizytę, zadzwoń: {clinic_phone}."
     ),
     "template_2day": (
         "Przypominamy o {rodzaj_wizyty} {imie_nazwisko} już za 2 dni, {data} o godz. {godzina} "
-        "u lek. {lekarz} w {clinic_name}.{koszt_info} Aby odwołać wizytę, zadzwoń: {clinic_phone}."
+        "u {lekarz} w {clinic_name}.{koszt_info} Aby odwołać wizytę, zadzwoń: {clinic_phone}."
     ),
     "template_reschedule": (
         "Przypominamy o możliwości bezpłatnego przełożenia dzisiejszej wizyty do godz. 12:00. "
