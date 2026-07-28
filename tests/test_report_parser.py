@@ -6,6 +6,31 @@ from report_parser import load_report
 RAPORTY_DIR = Path(__file__).parent.parent / "raporty"
 
 
+def test_csv_sample_skips_blocked_slot_rows():
+    visits = load_report(RAPORTY_DIR / "raport_uwagi.csv")
+    assert all(v.patient_name != "[ blokada wpisu ]" for v in visits)
+
+
+def test_foreign_phone_number_is_not_read_as_price(tmp_path):
+    content = (
+        "1 sierpnia 2026;Doktor Testowy\n"
+        ";;;;;;;\n"
+        "12345678901\n"
+        "1;1;10:00;Jan Kowalski\n"
+        "+41793038058\n"
+        "150\n"
+    )
+    csv_path = tmp_path / "raport.csv"
+    csv_path.write_bytes(content.encode("utf-8-sig"))
+
+    visits = load_report(csv_path)
+
+    assert len(visits) == 1
+    visit = visits[0]
+    assert visit.phones == []
+    assert visit.price == 150.0
+
+
 def test_xls_sample_parses_expected_count_and_first_row():
     visits = load_report(RAPORTY_DIR / "raport1.xls")
     assert len(visits) == 48

@@ -22,7 +22,6 @@ LOGO_PATH = ASSETS_DIR / "psyche_logo.png"
 
 REMINDER_MODES = [
     ("5-day", "5 dni przed", "template_5day"),
-    ("2-day", "2 dni przed", "template_2day"),
     ("reschedule", "Przypomnienie o przelozeniu", "template_reschedule"),
 ]
 _MODE_LABELS = [label for _, label, _ in REMINDER_MODES]
@@ -189,17 +188,6 @@ class SettingsWindow(ctk.CTkToplevel):
         self.template_5day.pack(fill="x", padx=12)
         self.template_5day.insert("1.0", self.templates["template_5day"])
 
-        ctk.CTkLabel(
-            parent, text="Szablon przypomnienia (2 dni przed wizyta):",
-            font=theme.font(12, "bold"), text_color=theme.TEXT,
-        ).pack(anchor="w", padx=12, pady=(12, 4))
-        self.template_2day = ctk.CTkTextbox(
-            parent, height=90, wrap="word", fg_color=theme.BG,
-            border_width=1, border_color=theme.BORDER, corner_radius=8,
-        )
-        self.template_2day.pack(fill="x", padx=12)
-        self.template_2day.insert("1.0", self.templates["template_2day"])
-
         self._hint(
             parent,
             "Dostepne pola: {imie_nazwisko} {data} {godzina} {lekarz} {rodzaj_wizyty} "
@@ -309,7 +297,6 @@ class SettingsWindow(ctk.CTkToplevel):
         templates_store.save(
             {
                 "template_5day": self.template_5day.get("1.0", "end").strip(),
-                "template_2day": self.template_2day.get("1.0", "end").strip(),
                 "template_reschedule": self.template_reschedule.get("1.0", "end").strip(),
                 "clinic_name": self.clinic_name.get().strip(),
                 "clinic_phone": self.clinic_phone.get().strip(),

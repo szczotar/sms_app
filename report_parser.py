@@ -50,8 +50,14 @@ _DATE_RE = re.compile(r"(\d{1,2})\s+(" + "|".join(_MONTHS) + r")\s+(\d{4})", re.
 _TIME_RE = re.compile(r"^(\d{1,2}):(\d{2})(?::\d{2})?$")
 _PESEL_RE = re.compile(r"^\d{11}$")
 _PHONE_RE = re.compile(r"^(?:\+?48)?(\d{9})$")
+# Broader than _PHONE_RE: matches any digit string that *looks* like a phone
+# number (e.g. a foreign number such as "+41793038058") even if it isn't a
+# valid Polish one. Content matching this must never fall through to price
+# extraction - amounts only ever come from the Uwagi row.
+_PHONE_LOOKS_LIKE_RE = re.compile(r"^\+?\d{7,15}$")
 _PRICE_NUM_RE = re.compile(r"(\d+(?:[.,]\d{1,2})?)")
 _HEADER_KEYWORDS = {"lp", "nr", "godz", "pesel", "telefon", "uwagi"}
+_BLOCKED_SLOT_RE = re.compile(r"^\[?\s*blokada\s+wpisu\s*\]?$", re.IGNORECASE)
 
 # how many content rows after a patient row to keep looking for phone/price
 _LOOKAHEAD_ROWS = 3
@@ -162,6 +168,18 @@ def _extract_price(content: str) -> tuple[float | None, str]:
     return None, content
 
 
+def _looks_like_phone(content: str) -> bool:
+    for part in content.split(","):
+        digits = part.strip().replace(" ", "").replace("-", "")
+        if not _PHONE_LOOKS_LIKE_RE.match(digits):
+            return False
+    return True
+
+
+def _is_blocked_slot(name: str) -> bool:
+    return bool(_BLOCKED_SLOT_RE.match(name.strip()))
+
+
 def load_report(path: Path | str) -> list[Visit]:
     grid = _read_grid(Path(path))
     visits: list[Visit] = []
@@ -174,6 +192,9 @@ def load_report(path: Path | str) -> list[Visit]:
 
     def flush_pending():
         nonlocal pending
+        if pending is not None and _is_blocked_slot(pending["name"]):
+            pending = None
+            return
         if pending is not None:
             visits.append(Visit(
                 doctor=current_doctor or "",
@@ -230,6 +251,11 @@ def load_report(path: Path | str) -> list[Visit]:
             if phones is not None:
                 pending["phones"] = phones
                 continue
+
+        if _looks_like_phone(content):
+            # Doesn't match the strict Polish phone pattern (e.g. a foreign
+            # number), but is clearly phone-shaped - never misread as a price.
+            continue
 
         price, note = _extract_price(content)
         if price is not None:
