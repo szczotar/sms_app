@@ -1,12 +1,12 @@
 import config
-from gui import MainWindow
+from gui import App
 from sent_log import SentLog
-from sms_sender import ApiSmsPlSender, MockSmsSender
+from sms_sender import HostedSmsSender, MockSmsSender
 
 
 def build_sender():
-    if config.API_SMS_PL_KEY:
-        return ApiSmsPlSender(config.API_SMS_PL_KEY, config.API_SMS_PL_SENDER)
+    if config.HOSTEDSMS_EMAIL and config.HOSTEDSMS_PASSWORD:
+        return HostedSmsSender(config.HOSTEDSMS_EMAIL, config.HOSTEDSMS_PASSWORD, config.HOSTEDSMS_SENDER)
     return MockSmsSender()
 
 
@@ -14,7 +14,7 @@ def main():
     sender = build_sender()
     is_mock = isinstance(sender, MockSmsSender)
     sent_log = SentLog()
-    window = MainWindow(sender=sender, sent_log=sent_log, is_mock=is_mock)
+    window = App(sender=sender, sent_log=sent_log, is_mock=is_mock)
     window.mainloop()
 
 

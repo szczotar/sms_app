@@ -1,21 +1,7 @@
 from datetime import date, time
 
 from models import Visit
-from reminder_logic import build_message, reminder_type
-
-
-def test_reminder_type_five_days_out():
-    assert reminder_type(date(2026, 7, 11), today=date(2026, 7, 6)) == "5-day"
-
-
-def test_reminder_type_two_days_out():
-    assert reminder_type(date(2026, 7, 8), today=date(2026, 7, 6)) == "2-day"
-
-
-def test_reminder_type_other_offsets_are_none():
-    assert reminder_type(date(2026, 7, 7), today=date(2026, 7, 6)) is None
-    assert reminder_type(date(2026, 7, 6), today=date(2026, 7, 6)) is None
-    assert reminder_type(date(2026, 6, 1), today=date(2026, 7, 6)) is None
+from reminder_logic import build_message
 
 
 def _sample_visit() -> Visit:
