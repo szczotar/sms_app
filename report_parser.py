@@ -30,6 +30,7 @@ from pathlib import Path
 import pandas as pd
 
 from models import Visit
+from text_utils import normalize_name
 
 _MONTHS = {
     "styczeń": 1, "stycznia": 1,
@@ -180,6 +181,48 @@ def _is_blocked_slot(name: str) -> bool:
     return bool(_BLOCKED_SLOT_RE.match(name.strip()))
 
 
+def _merge_split_visits(visits: list[Visit]) -> list[Visit]:
+    """Some doctors' calendars use 15-minute slots, so one longer visit (e.g.
+    45 minutes) is printed as several consecutive rows for the same patient.
+    Collapse rows that share the same patient, date and doctor into a single
+    Visit, so reminders aren't sent more than once and zestawienie doesn't
+    count the same visit's revenue more than once.
+
+    The price can appear on every module row or on only one of them, so
+    every row in the group is checked - but once a price is found it's kept
+    as-is, never summed across rows (it's one visit's price, not one per
+    module).
+    """
+    merged: dict[tuple[str, date, str], Visit] = {}
+    for visit in visits:
+        key = (normalize_name(visit.patient_name), visit.appointment_date, normalize_name(visit.doctor))
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = Visit(
+                doctor=visit.doctor,
+                appointment_date=visit.appointment_date,
+                appointment_time=visit.appointment_time,
+                patient_name=visit.patient_name,
+                pesel=visit.pesel,
+                phones=list(visit.phones),
+                price=visit.price,
+                price_note=visit.price_note,
+            )
+            continue
+        if visit.appointment_time < existing.appointment_time:
+            existing.appointment_time = visit.appointment_time
+        if not existing.pesel and visit.pesel:
+            existing.pesel = visit.pesel
+        for phone in visit.phones:
+            if phone not in existing.phones:
+                existing.phones.append(phone)
+        if existing.price is None and visit.price is not None:
+            existing.price = visit.price
+        if not existing.price_note and visit.price_note:
+            existing.price_note = visit.price_note
+    return list(merged.values())
+
+
 def load_report(path: Path | str) -> list[Visit]:
     grid = _read_grid(Path(path))
     visits: list[Visit] = []
@@ -264,4 +307,4 @@ def load_report(path: Path | str) -> list[Visit]:
             pending["price_note"] = note.strip()
 
     flush_pending()
-    return visits
+    return _merge_split_visits(visits)
