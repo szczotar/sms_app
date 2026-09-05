@@ -17,9 +17,18 @@ merging differs per format), so rows are classified by matching value
 *patterns* (an HH:MM time, an 11-digit PESEL, a "DD <month> YYYY" date, a
 9-digit phone) rather than by fixed column index.
 
-There is no per-row status column in this export format: "Do realizacji"
+The old (reminders) template has no per-row status column: "Do realizacji"
 appears once, as a report-level label, not per visit. Callers should assume
-the report was already filtered upstream to the visits that matter.
+that report was already filtered upstream to the visits that matter.
+
+The newer (zestawienie) template adds a per-visit "Status" column - a
+separate cell from "Uwagi" that can land in the same content row (e.g.
+"800" and "Nie zrealizowane" as two cells of one row, or just "Wykonane"
+alone when there's no price). One of a fixed set of known status words
+("Wykonane", "Nie zrealizowane", "Rezygnacja z wykonania") is recognized
+wherever it appears in a row and captured on Visit.status, independent of
+Uwagi/price extraction; reports without this column simply never populate
+it.
 """
 
 import csv
@@ -57,8 +66,23 @@ _PHONE_RE = re.compile(r"^(?:\+?48)?(\d{9})$")
 # extraction - amounts only ever come from the Uwagi row.
 _PHONE_LOOKS_LIKE_RE = re.compile(r"^\+?\d{7,15}$")
 _PRICE_NUM_RE = re.compile(r"(\d+(?:[.,]\d{1,2})?)")
-_HEADER_KEYWORDS = {"lp", "nr", "godz", "pesel", "telefon", "uwagi"}
+_HEADER_KEYWORDS = {"lp", "nr", "godz", "pesel", "telefon", "uwagi", "status"}
 _BLOCKED_SLOT_RE = re.compile(r"^\[?\s*blokada\s+wpisu\s*\]?$", re.IGNORECASE)
+# Repeats as a running page header after every page break in the zestawienie
+# template (e.g. "PACJENCI LEKARZY / PIELĘGNIAREK"). Must be skipped like a
+# header row - otherwise it burns a lookahead slot meant for the real
+# phone/price/status rows and its text leaks into price_note.
+_SECTION_TITLE_RE = re.compile(r"^pacjenci\b", re.IGNORECASE)
+
+# Status is decisive for zestawienie's per-doctor revenue calculation, so
+# only these exact words (case-insensitive) are recognized; anything else
+# found where a status would be expected is treated as unrecognized (Visit.
+# status stays None) rather than guessed at.
+_STATUS_WORDS = {"wykonane", "nie zrealizowane", "rezygnacja z wykonania"}
+# Priority used when split-slot module rows disagree on status (only one
+# slot is ever actually "Wykonane" in practice): a confirmed completion
+# always wins, and an explicit cancellation beats a mere non-completion.
+_STATUS_PRIORITY = ("wykonane", "rezygnacja z wykonania", "nie zrealizowane")
 
 # how many content rows after a patient row to keep looking for phone/price
 _LOOKAHEAD_ROWS = 3
@@ -122,7 +146,7 @@ def _is_header_row(row: list[str | None]) -> bool:
     lowered = {c.lower() for c in row if c}
     if lowered & _HEADER_KEYWORDS:
         return True
-    return any("strona" in c.lower() for c in row if c)
+    return any("strona" in c.lower() or _SECTION_TITLE_RE.match(c) for c in row if c)
 
 
 def _classify_patient_row(row: list[str | None]) -> tuple[time, str] | None:
@@ -181,7 +205,20 @@ def _is_blocked_slot(name: str) -> bool:
     return bool(_BLOCKED_SLOT_RE.match(name.strip()))
 
 
-def _merge_split_visits(visits: list[Visit]) -> list[Visit]:
+def _match_status_word(cell: str) -> str | None:
+    cleaned = cell.strip()
+    return cleaned if cleaned.lower() in _STATUS_WORDS else None
+
+
+def _resolve_merged_status(statuses: list[str]) -> str | None:
+    for wanted in _STATUS_PRIORITY:
+        for status in statuses:
+            if status.strip().lower() == wanted:
+                return status.strip()
+    return statuses[0].strip() if statuses else None
+
+
+def _merge_split_visits(visits: list[Visit], log=lambda msg: None) -> list[Visit]:
     """Some doctors' calendars use 15-minute slots, so one longer visit (e.g.
     45 minutes) is printed as several consecutive rows for the same patient.
     Collapse rows that share the same patient, date and doctor into a single
@@ -192,8 +229,15 @@ def _merge_split_visits(visits: list[Visit]) -> list[Visit]:
     every row in the group is checked - but once a price is found it's kept
     as-is, never summed across rows (it's one visit's price, not one per
     module).
+
+    Status is resolved separately, after all rows in a group are known: in
+    practice only one module row ever carries "Wykonane", so a fixed
+    priority (see _STATUS_PRIORITY) decides the merged visit's status
+    instead of "first row found" - order in the source file shouldn't
+    matter for something this consequential to billing.
     """
     merged: dict[tuple[str, date, str], Visit] = {}
+    statuses: dict[tuple[str, date, str], list[str]] = {}
     for visit in visits:
         key = (normalize_name(visit.patient_name), visit.appointment_date, normalize_name(visit.doctor))
         existing = merged.get(key)
@@ -208,22 +252,36 @@ def _merge_split_visits(visits: list[Visit]) -> list[Visit]:
                 price=visit.price,
                 price_note=visit.price_note,
             )
-            continue
-        if visit.appointment_time < existing.appointment_time:
-            existing.appointment_time = visit.appointment_time
-        if not existing.pesel and visit.pesel:
-            existing.pesel = visit.pesel
-        for phone in visit.phones:
-            if phone not in existing.phones:
-                existing.phones.append(phone)
-        if existing.price is None and visit.price is not None:
-            existing.price = visit.price
-        if not existing.price_note and visit.price_note:
-            existing.price_note = visit.price_note
+        else:
+            if visit.appointment_time < existing.appointment_time:
+                existing.appointment_time = visit.appointment_time
+            if not existing.pesel and visit.pesel:
+                existing.pesel = visit.pesel
+            for phone in visit.phones:
+                if phone not in existing.phones:
+                    existing.phones.append(phone)
+            if existing.price is None and visit.price is not None:
+                existing.price = visit.price
+            if not existing.price_note and visit.price_note:
+                existing.price_note = visit.price_note
+        if visit.status:
+            statuses.setdefault(key, []).append(visit.status)
+
+    for key, visit in merged.items():
+        group_statuses = statuses.get(key, [])
+        distinct = {s.strip().lower() for s in group_statuses}
+        if len(distinct) > 1:
+            log(
+                f"Sprzeczne statusy dla wizyty {visit.patient_name} "
+                f"({visit.appointment_date.strftime('%d.%m.%Y')}): "
+                f"{', '.join(sorted({s.strip() for s in group_statuses}))}"
+            )
+        visit.status = _resolve_merged_status(group_statuses)
+
     return list(merged.values())
 
 
-def load_report(path: Path | str) -> list[Visit]:
+def load_report(path: Path | str, log=lambda msg: None) -> list[Visit]:
     grid = _read_grid(Path(path))
     visits: list[Visit] = []
 
@@ -248,6 +306,7 @@ def load_report(path: Path | str) -> list[Visit]:
                 phones=pending["phones"],
                 price=pending["price"],
                 price_note=pending["price_note"],
+                status=pending["status"],
             ))
             pending = None
 
@@ -273,7 +332,7 @@ def load_report(path: Path | str) -> list[Visit]:
             time_val, name = patient
             pending = {
                 "time": time_val, "name": name, "pesel": pending_pesel,
-                "phones": [], "price": None, "price_note": None,
+                "phones": [], "price": None, "price_note": None, "status": None,
             }
             pending_pesel = None
             rows_since_pending = 0
@@ -288,6 +347,23 @@ def load_report(path: Path | str) -> list[Visit]:
         if rows_since_pending >= _LOOKAHEAD_ROWS:
             continue
         rows_since_pending += 1
+
+        # Uwagi and Status can be two separate cells of the same content row
+        # (e.g. "800" and "Nie zrealizowane"); pull any recognized status
+        # word out first so the rest of the row is handled exactly as before.
+        remaining_cells = []
+        for cell in row:
+            if not cell:
+                continue
+            status_word = _match_status_word(cell)
+            if status_word is not None:
+                pending["status"] = status_word
+            else:
+                remaining_cells.append(cell)
+
+        if not remaining_cells:
+            continue
+        content = remaining_cells[0]
 
         if not pending["phones"]:
             phones = _split_phones(content)
@@ -307,4 +383,4 @@ def load_report(path: Path | str) -> list[Visit]:
             pending["price_note"] = note.strip()
 
     flush_pending()
-    return _merge_split_visits(visits)
+    return _merge_split_visits(visits, log=log)

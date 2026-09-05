@@ -38,24 +38,30 @@ def save(employees: list[dict], path: Path = _DEFAULT_PATH) -> None:
         json.dump(employees, f, ensure_ascii=False, indent=2)
 
 
-def resolve_rodzaj_wizyty(doctor: str, employees: list[dict]) -> str:
-    """Locative-case phrase for the {rodzaj_wizyty} template placeholder."""
+def find_employee(doctor: str, employees: list[dict]) -> dict | None:
     target = normalize_name(doctor)
     for emp in employees:
         if normalize_name(emp["name"]) == target:
-            if emp["specialization"].strip().lower() == PSYCHIATRA.lower():
-                return "konsultacji lekarskiej"
-            return "sesji"
-    return "wizycie"
+            return emp
+    return None
+
+
+def is_psychiatra(employee: dict) -> bool:
+    return employee["specialization"].strip().lower() == PSYCHIATRA.lower()
+
+
+def resolve_rodzaj_wizyty(doctor: str, employees: list[dict]) -> str:
+    """Locative-case phrase for the {rodzaj_wizyty} template placeholder."""
+    employee = find_employee(doctor, employees)
+    if employee is None:
+        return "wizycie"
+    return "konsultacji lekarskiej" if is_psychiatra(employee) else "sesji"
 
 
 def resolve_title(doctor: str, employees: list[dict]) -> str:
     """Title prefix for the specialist's name: "dr" for psychiatrists,
     "mgr" for psychologists/dietitians/others (magister, not a physician)."""
-    target = normalize_name(doctor)
-    for emp in employees:
-        if normalize_name(emp["name"]) == target:
-            if emp["specialization"].strip().lower() == PSYCHIATRA.lower():
-                return "dr"
-            return "mgr"
-    return ""
+    employee = find_employee(doctor, employees)
+    if employee is None:
+        return ""
+    return "dr" if is_psychiatra(employee) else "mgr"

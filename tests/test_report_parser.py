@@ -125,3 +125,124 @@ def test_csv_sample_all_pesels_are_eleven_digits_except_blocked_slots():
         else:
             assert len(visit.pesel) == 11
             assert visit.pesel.isdigit()
+
+
+def test_status_extracted_alongside_price_in_same_row(tmp_path):
+    # zestawienie template: Uwagi and Status can be two cells of one row.
+    content = (
+        "1 sierpnia 2026;Doktor Testowy\n"
+        ";;;;;;;\n"
+        "12345678901\n"
+        "1;1;10:00;Jan Kowalski\n"
+        "600111222\n"
+        "800;Wykonane\n"
+    )
+    csv_path = tmp_path / "raport.csv"
+    csv_path.write_bytes(content.encode("utf-8-sig"))
+
+    visits = load_report(csv_path)
+
+    assert len(visits) == 1
+    visit = visits[0]
+    assert visit.price == 800.0
+    assert visit.status == "Wykonane"
+    assert visit.price_note is None
+
+
+def test_status_only_row_without_uwagi(tmp_path):
+    content = (
+        "1 sierpnia 2026;Doktor Testowy\n"
+        ";;;;;;;\n"
+        "12345678901\n"
+        "1;1;10:00;Jan Kowalski\n"
+        "600111222\n"
+        "Nie zrealizowane\n"
+    )
+    csv_path = tmp_path / "raport.csv"
+    csv_path.write_bytes(content.encode("utf-8-sig"))
+
+    visits = load_report(csv_path)
+
+    assert len(visits) == 1
+    visit = visits[0]
+    assert visit.price is None
+    assert visit.status == "Nie zrealizowane"
+
+
+def test_merge_priority_wykonane_beats_other_statuses(tmp_path):
+    # Real data: only one module row is ever "Wykonane" - it must win over
+    # "Nie zrealizowane"/"Rezygnacja z wykonania" on the other module rows,
+    # regardless of row order, and the conflict should be logged once.
+    content = (
+        "1 sierpnia 2026;Doktor Testowy\n"
+        ";;;;;;;\n"
+        "12345678901\n"
+        "1;1;10:00;Jan Kowalski\n"
+        "600111222\n"
+        "Nie zrealizowane\n"
+        "12345678901\n"
+        "2;2;10:15;Jan Kowalski\n"
+        "150;Wykonane\n"
+        "12345678901\n"
+        "3;3;10:30;Jan Kowalski\n"
+        "Rezygnacja z wykonania\n"
+    )
+    csv_path = tmp_path / "raport.csv"
+    csv_path.write_bytes(content.encode("utf-8-sig"))
+
+    warnings = []
+    visits = load_report(csv_path, log=warnings.append)
+
+    assert len(visits) == 1
+    visit = visits[0]
+    assert visit.status == "Wykonane"
+    assert visit.price == 150.0
+    assert len(warnings) == 1
+    assert "Jan Kowalski" in warnings[0]
+
+
+def test_merge_priority_rezygnacja_beats_nie_zrealizowane(tmp_path):
+    # With no "Wykonane" present, a cancellation on any module row means the
+    # visit didn't happen - even if another module row says "Nie zrealizowane".
+    content = (
+        "1 sierpnia 2026;Doktor Testowy\n"
+        ";;;;;;;\n"
+        "12345678901\n"
+        "1;1;10:00;Jan Kowalski\n"
+        "600111222\n"
+        "Nie zrealizowane\n"
+        "12345678901\n"
+        "2;2;10:15;Jan Kowalski\n"
+        "Rezygnacja z wykonania\n"
+    )
+    csv_path = tmp_path / "raport.csv"
+    csv_path.write_bytes(content.encode("utf-8-sig"))
+
+    visits = load_report(csv_path)
+
+    assert len(visits) == 1
+    assert visits[0].status == "Rezygnacja z wykonania"
+
+
+def test_section_title_line_not_treated_as_uwagi(tmp_path):
+    # "PACJENCI ..." repeats as a running page header in the zestawienie
+    # template and must be skipped like "Strona N", not read as Uwagi text.
+    content = (
+        "1 sierpnia 2026;Doktor Testowy\n"
+        ";;;;;;;\n"
+        "12345678901\n"
+        "1;1;10:00;Jan Kowalski\n"
+        "600111222\n"
+        "PACJENCI LEKARZY / PIELEGNIAREK\n"
+        "150;Wykonane\n"
+    )
+    csv_path = tmp_path / "raport.csv"
+    csv_path.write_bytes(content.encode("utf-8-sig"))
+
+    visits = load_report(csv_path)
+
+    assert len(visits) == 1
+    visit = visits[0]
+    assert visit.price == 150.0
+    assert visit.status == "Wykonane"
+    assert visit.price_note is None

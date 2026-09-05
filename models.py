@@ -12,3 +12,4 @@ class Visit:
     phones: list[str] = field(default_factory=list)
     price: float | None = None
     price_note: str | None = None
+    status: str | None = None
