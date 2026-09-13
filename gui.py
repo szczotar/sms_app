@@ -560,12 +560,18 @@ class ZestawienieFrame(ctk.CTkFrame):
             fg_color=theme.MAGENTA, hover_color=theme.MAGENTA_DARK,
             font=theme.font(13, "bold"), height=40, corner_radius=10, width=210,
         )
-        self.generate_button.pack(anchor="w", padx=20, pady=24)
+        self.generate_button.pack(anchor="w", padx=20, pady=(24, 10))
+
+        self.console = ctk.CTkTextbox(
+            self, state="disabled", wrap="word", fg_color=theme.CARD, text_color=theme.TEXT,
+            font=("Consolas", 10), corner_radius=12, border_width=1, border_color=theme.BORDER,
+        )
+        self.console.pack(fill="both", expand=True, padx=20, pady=(0, 10))
 
         self.status_label = ctk.CTkLabel(
             self, text="", font=theme.font(11), text_color=theme.MUTED, justify="left", wraplength=700
         )
-        self.status_label.pack(anchor="w", padx=20)
+        self.status_label.pack(anchor="w", padx=20, pady=(0, 16))
 
     def choose_input(self):
         path = filedialog.askopenfilename(
@@ -577,6 +583,12 @@ class ZestawienieFrame(ctk.CTkFrame):
             self.input_label.configure(text=path)
             self.generate_button.configure(state="normal")
 
+    def log(self, message: str):
+        self.console.configure(state="normal")
+        self.console.insert("end", message + "\n")
+        self.console.see("end")
+        self.console.configure(state="disabled")
+
     def generate(self):
         output_path = filedialog.asksaveasfilename(
             title="Zapisz zestawienie jako...",
@@ -585,8 +597,11 @@ class ZestawienieFrame(ctk.CTkFrame):
         )
         if not output_path:
             return
+        self.console.configure(state="normal")
+        self.console.delete("1.0", "end")
+        self.console.configure(state="disabled")
         try:
-            zestawienie.generate(self.input_path, output_path)
+            zestawienie.generate(self.input_path, output_path, log=self.log)
         except Exception as exc:
             self.status_label.configure(text=f"Blad: {exc}", text_color=theme.MAGENTA_DARK)
             messagebox.showerror("Zestawienie", f"Nie udalo sie wygenerowac zestawienia: {exc}")
