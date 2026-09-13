@@ -172,7 +172,8 @@ def test_status_only_row_without_uwagi(tmp_path):
 def test_merge_priority_wykonane_beats_other_statuses(tmp_path):
     # Real data: only one module row is ever "Wykonane" - it must win over
     # "Nie zrealizowane"/"Rezygnacja z wykonania" on the other module rows,
-    # regardless of row order, and the conflict should be logged once.
+    # regardless of row order. Module rows disagreeing on status is routine,
+    # not an error, so it resolves silently (no log call).
     content = (
         "1 sierpnia 2026;Doktor Testowy\n"
         ";;;;;;;\n"
@@ -190,20 +191,19 @@ def test_merge_priority_wykonane_beats_other_statuses(tmp_path):
     csv_path = tmp_path / "raport.csv"
     csv_path.write_bytes(content.encode("utf-8-sig"))
 
-    warnings = []
-    visits = load_report(csv_path, log=warnings.append)
+    visits = load_report(csv_path)
 
     assert len(visits) == 1
     visit = visits[0]
     assert visit.status == "Wykonane"
     assert visit.price == 150.0
-    assert len(warnings) == 1
-    assert "Jan Kowalski" in warnings[0]
 
 
-def test_merge_priority_rezygnacja_beats_nie_zrealizowane(tmp_path):
-    # With no "Wykonane" present, a cancellation on any module row means the
-    # visit didn't happen - even if another module row says "Nie zrealizowane".
+def test_merge_priority_nie_zrealizowane_beats_rezygnacja(tmp_path):
+    # With no "Wykonane" present, a recorded "Nie zrealizowane" on any module
+    # row means the visit still counts - it must win over "Rezygnacja z
+    # wykonania" on another module row, not the other way round, otherwise
+    # the visit would be silently dropped from the zestawienie export.
     content = (
         "1 sierpnia 2026;Doktor Testowy\n"
         ";;;;;;;\n"
@@ -221,7 +221,7 @@ def test_merge_priority_rezygnacja_beats_nie_zrealizowane(tmp_path):
     visits = load_report(csv_path)
 
     assert len(visits) == 1
-    assert visits[0].status == "Rezygnacja z wykonania"
+    assert visits[0].status == "Nie zrealizowane"
 
 
 def test_section_title_line_not_treated_as_uwagi(tmp_path):

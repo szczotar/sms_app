@@ -81,8 +81,11 @@ _SECTION_TITLE_RE = re.compile(r"^pacjenci\b", re.IGNORECASE)
 _STATUS_WORDS = {"wykonane", "nie zrealizowane", "rezygnacja z wykonania"}
 # Priority used when split-slot module rows disagree on status (only one
 # slot is ever actually "Wykonane" in practice): a confirmed completion
-# always wins, and an explicit cancellation beats a mere non-completion.
-_STATUS_PRIORITY = ("wykonane", "rezygnacja z wykonania", "nie zrealizowane")
+# always wins; "Nie zrealizowane" beats "Rezygnacja z wykonania" because a
+# recorded non-completion means the visit did happen (in the calendar sense)
+# and should still count, whereas a stray "Rezygnacja" on another module row
+# would otherwise wipe it from the export entirely.
+_STATUS_PRIORITY = ("wykonane", "nie zrealizowane", "rezygnacja z wykonania")
 
 # how many content rows after a patient row to keep looking for phone/price
 _LOOKAHEAD_ROWS = 3
@@ -218,7 +221,7 @@ def _resolve_merged_status(statuses: list[str]) -> str | None:
     return statuses[0].strip() if statuses else None
 
 
-def _merge_split_visits(visits: list[Visit], log=lambda msg: None) -> list[Visit]:
+def _merge_split_visits(visits: list[Visit]) -> list[Visit]:
     """Some doctors' calendars use 15-minute slots, so one longer visit (e.g.
     45 minutes) is printed as several consecutive rows for the same patient.
     Collapse rows that share the same patient, date and doctor into a single
@@ -234,7 +237,9 @@ def _merge_split_visits(visits: list[Visit], log=lambda msg: None) -> list[Visit
     practice only one module row ever carries "Wykonane", so a fixed
     priority (see _STATUS_PRIORITY) decides the merged visit's status
     instead of "first row found" - order in the source file shouldn't
-    matter for something this consequential to billing.
+    matter for something this consequential to billing. Module rows
+    disagreeing on status is routine (not a data error), so it's resolved
+    silently rather than logged.
     """
     merged: dict[tuple[str, date, str], Visit] = {}
     statuses: dict[tuple[str, date, str], list[str]] = {}
@@ -269,19 +274,12 @@ def _merge_split_visits(visits: list[Visit], log=lambda msg: None) -> list[Visit
 
     for key, visit in merged.items():
         group_statuses = statuses.get(key, [])
-        distinct = {s.strip().lower() for s in group_statuses}
-        if len(distinct) > 1:
-            log(
-                f"Sprzeczne statusy dla wizyty {visit.patient_name} "
-                f"({visit.appointment_date.strftime('%d.%m.%Y')}): "
-                f"{', '.join(sorted({s.strip() for s in group_statuses}))}"
-            )
         visit.status = _resolve_merged_status(group_statuses)
 
     return list(merged.values())
 
 
-def load_report(path: Path | str, log=lambda msg: None) -> list[Visit]:
+def load_report(path: Path | str) -> list[Visit]:
     grid = _read_grid(Path(path))
     visits: list[Visit] = []
 
@@ -313,7 +311,16 @@ def load_report(path: Path | str, log=lambda msg: None) -> list[Visit]:
     for row in grid:
         content = _row_content(row)
         if content is None:
-            flush_pending()
+            # A blank row can be a genuine block separator, but it can also
+            # be an empty phone/price/status slot for a patient missing that
+            # field (e.g. no phone on file) - the real content then lands
+            # 1-2 rows later. Only flush once the lookahead budget itself is
+            # exhausted, so a mid-block blank doesn't prematurely finalize
+            # the visit before its status/price row is reached.
+            if pending is not None:
+                rows_since_pending += 1
+                if rows_since_pending >= _LOOKAHEAD_ROWS:
+                    flush_pending()
             continue
 
         found = _find_date(row)
@@ -383,4 +390,4 @@ def load_report(path: Path | str, log=lambda msg: None) -> list[Visit]:
             pending["price_note"] = note.strip()
 
     flush_pending()
-    return _merge_split_visits(visits, log=log)
+    return _merge_split_visits(visits)

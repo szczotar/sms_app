@@ -41,7 +41,7 @@ def _status_counts(status: str, is_psychiatra: bool) -> bool:
 
 
 def generate(input_path: Path | str, output_path: Path | str, log=lambda msg: None) -> None:
-    visits = report_parser.load_report(input_path, log=log)
+    visits = report_parser.load_report(input_path)
 
     if not any(v.status for v in visits):
         raise ValueError(
