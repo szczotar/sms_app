@@ -223,10 +223,19 @@ def _resolve_merged_status(statuses: list[str]) -> str | None:
 
 def _merge_split_visits(visits: list[Visit]) -> list[Visit]:
     """Some doctors' calendars use 15-minute slots, so one longer visit (e.g.
-    45 minutes) is printed as several consecutive rows for the same patient.
-    Collapse rows that share the same patient, date and doctor into a single
-    Visit, so reminders aren't sent more than once and zestawienie doesn't
-    count the same visit's revenue more than once.
+    45 minutes) is printed as several consecutive rows for the same patient -
+    but crucially, every module row of that same visit carries the exact same
+    Godz (start time); confirmed against real data (`raporty/sierpien_Wszystko.xls`).
+    Collapse rows that share the same patient, date, doctor AND appointment
+    time into a single Visit, so reminders aren't sent more than once and
+    zestawienie doesn't count the same visit's revenue more than once.
+
+    Time must be part of the key: a patient can have two genuinely separate
+    consecutive appointments the same day with the same doctor (e.g. booked
+    for two back-to-back 1-hour slots) - each has its own Godz, its own
+    price and its own status, and must stay two separate Visits. Merging on
+    patient+date+doctor alone (the old key) silently dropped one of the two
+    visits' revenue and skipped its SMS/status entirely - that was the bug.
 
     The price can appear on every module row or on only one of them, so
     every row in the group is checked - but once a price is found it's kept
@@ -241,10 +250,15 @@ def _merge_split_visits(visits: list[Visit]) -> list[Visit]:
     disagreeing on status is routine (not a data error), so it's resolved
     silently rather than logged.
     """
-    merged: dict[tuple[str, date, str], Visit] = {}
-    statuses: dict[tuple[str, date, str], list[str]] = {}
+    merged: dict[tuple[str, date, time, str], Visit] = {}
+    statuses: dict[tuple[str, date, time, str], list[str]] = {}
     for visit in visits:
-        key = (normalize_name(visit.patient_name), visit.appointment_date, normalize_name(visit.doctor))
+        key = (
+            normalize_name(visit.patient_name),
+            visit.appointment_date,
+            visit.appointment_time,
+            normalize_name(visit.doctor),
+        )
         existing = merged.get(key)
         if existing is None:
             merged[key] = Visit(
@@ -258,8 +272,6 @@ def _merge_split_visits(visits: list[Visit]) -> list[Visit]:
                 price_note=visit.price_note,
             )
         else:
-            if visit.appointment_time < existing.appointment_time:
-                existing.appointment_time = visit.appointment_time
             if not existing.pesel and visit.pesel:
                 existing.pesel = visit.pesel
             for phone in visit.phones:

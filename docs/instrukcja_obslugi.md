@@ -117,8 +117,11 @@ Aby dodać pracownika: wpisz specjalizację i nazwisko w polach na dole listy, k
 
 ## 9. Najczęstsze pytania i problemy
 
-**Niektórzy lekarze mają wizyty zapisane w modułach po 15 minut, więc np. wizyta 45-minutowa to w raporcie z Axon trzy osobne wiersze dla tego samego pacjenta. Czy pacjent dostanie 3 SMS-y, a w zestawieniu cena policzy się 3 razy?**
-Nie. Aplikacja automatycznie rozpoznaje takie wiersze (ten sam pacjent, ten sam dzień, ten sam lekarz) i traktuje je jako jedną wizytę – wysyła jeden SMS z godziną najwcześniejszego modułu, a w zestawieniu cena wizyty liczy się tylko raz, nawet jeśli w raporcie pojawiła się przy każdym module. Jeżeli ten sam pacjent ma tego samego dnia osobną wizytę u **innego** lekarza, to pozostaje ona traktowana jako oddzielna wizyta (osobny SMS, osobna pozycja w zestawieniu).
+**Niektórzy lekarze mają wizyty zapisane w modułach, więc np. jedna wizyta to w raporcie z Axon dwa/trzy osobne wiersze dla tego samego pacjenta o tej samej godzinie. Czy pacjent dostanie kilka SMS-ów, a w zestawieniu cena policzy się kilka razy?**
+Nie. Aplikacja automatycznie rozpoznaje takie wiersze (ten sam pacjent, ten sam dzień, ten sam lekarz **i ta sama godzina wizyty**) i traktuje je jako jedną wizytę – wysyła jeden SMS, a w zestawieniu cena wizyty liczy się tylko raz, nawet jeśli w raporcie pojawiła się przy każdym module.
+
+**Pacjent ma tego samego dnia u tego samego lekarza dwie wizyty pod rząd (np. dwie godziny, jedna po drugiej) – czy to się nie zleje w zestawieniu w jedną wizytę?**
+Nie – to są dwie różne godziny, więc aplikacja liczy je jako dwie osobne wizyty: każda dostaje swój SMS i osobną pozycję (cenę) w zestawieniu. To samo dotyczy sytuacji, gdy ten sam pacjent ma tego samego dnia osobną wizytę u **innego** lekarza – również zostaje ona osobną wizytą.
 
 **Wysłałem/am ten sam plik drugi raz przez pomyłkę – czy pacjenci dostaną SMS dwa razy?**
 Nie. Aplikacja zapamiętuje, komu i jaki rodzaj przypomnienia już wysłano dla danej wizyty (nawet po zamknięciu programu) i przy ponownej próbie pokaże w konsoli "POMINIĘTO: ... – przypomnienie już wysłane" zamiast wysyłać SMS ponownie.

@@ -58,10 +58,11 @@ def test_csv_sample_parses_expected_count_and_dates():
 
 
 def test_split_module_rows_merge_into_one_visit(tmp_path):
-    # A 45-minute visit booked in three consecutive 15-minute slots is
-    # printed as three separate rows for the same patient/day/doctor -
-    # these must collapse into a single Visit so only one SMS is sent and
-    # zestawienie doesn't count the price three times.
+    # A single visit booked across multiple modules is printed as several
+    # rows for the same patient/day/doctor, but real Axon exports show every
+    # module row carrying the exact same Godz (start time) - these must
+    # collapse into a single Visit so only one SMS is sent and zestawienie
+    # doesn't count the price more than once.
     content = (
         "1 sierpnia 2026;Doktor Testowy\n"
         ";;;;;;;\n"
@@ -70,11 +71,7 @@ def test_split_module_rows_merge_into_one_visit(tmp_path):
         "600111222\n"
         "\n"
         "12345678901\n"
-        "2;2;10:15;Jan Kowalski\n"
-        "150\n"
-        "\n"
-        "12345678901\n"
-        "3;3;10:30;Jan Kowalski\n"
+        "2;1;10:00;Jan Kowalski\n"
         "150\n"
     )
     csv_path = tmp_path / "raport.csv"
@@ -87,6 +84,36 @@ def test_split_module_rows_merge_into_one_visit(tmp_path):
     assert visit.appointment_time == time(10, 0)
     assert visit.phones == ["600111222"]
     assert visit.price == 150.0
+
+
+def test_same_patient_different_time_same_day_stays_separate(tmp_path):
+    # A patient booked for two consecutive full appointments (e.g. two
+    # back-to-back 1-hour slots with the same doctor) must NOT be merged
+    # just because the patient/day/doctor match - each is a separate,
+    # separately-priced visit. Regression test for a real bug: the old
+    # merge key (patient+date+doctor only, no time) collapsed these into
+    # one visit, dropping one visit's price and status from zestawienie.
+    content = (
+        "1 sierpnia 2026;Doktor Testowy\n"
+        ";;;;;;;\n"
+        "12345678901\n"
+        "1;1;14:00;Jan Kowalski\n"
+        "600111222\n"
+        "200;Nie zrealizowane\n"
+        "12345678901\n"
+        "2;2;15:00;Jan Kowalski\n"
+        "600111222\n"
+        "200;Nie zrealizowane\n"
+    )
+    csv_path = tmp_path / "raport.csv"
+    csv_path.write_bytes(content.encode("utf-8-sig"))
+
+    visits = load_report(csv_path)
+
+    assert len(visits) == 2
+    assert {v.appointment_time for v in visits} == {time(14, 0), time(15, 0)}
+    assert all(v.price == 200.0 for v in visits)
+    assert all(v.status == "Nie zrealizowane" for v in visits)
 
 
 def test_same_patient_different_doctor_same_day_stays_separate(tmp_path):
@@ -182,10 +209,10 @@ def test_merge_priority_wykonane_beats_other_statuses(tmp_path):
         "600111222\n"
         "Nie zrealizowane\n"
         "12345678901\n"
-        "2;2;10:15;Jan Kowalski\n"
+        "2;1;10:00;Jan Kowalski\n"
         "150;Wykonane\n"
         "12345678901\n"
-        "3;3;10:30;Jan Kowalski\n"
+        "3;1;10:00;Jan Kowalski\n"
         "Rezygnacja z wykonania\n"
     )
     csv_path = tmp_path / "raport.csv"
@@ -212,7 +239,7 @@ def test_merge_priority_nie_zrealizowane_beats_rezygnacja(tmp_path):
         "600111222\n"
         "Nie zrealizowane\n"
         "12345678901\n"
-        "2;2;10:15;Jan Kowalski\n"
+        "2;1;10:00;Jan Kowalski\n"
         "Rezygnacja z wykonania\n"
     )
     csv_path = tmp_path / "raport.csv"
